@@ -1,5 +1,5 @@
 'use client';
-
+console.log('🔴 Component rendered - check where this appears')
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter, useParams } from 'next/navigation';
@@ -163,7 +163,118 @@ function PlayerCard({
     </div>
   );
 }
+// --- Join Tournament Modal ---
+function JoinTournamentModal({
+  isOpen,
+  onClose,
+  onJoinExisting,
+  isLoading,
+  error,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onJoinExisting: (tournamentId: string) => Promise<void>;
+  isLoading: boolean;
+  error: string | null;
+}) {
+  const [tournaments, setTournaments] = useState<{ id: string; name: string; start_date: string; end_date: string }[]>([]);
+  const [loadingTournaments, setLoadingTournaments] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const fetchTournaments = async () => {
+      setLoadingTournaments(true);
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('tournaments')
+        .select('id, name, start_date, end_date')
+        .order('start_date', { ascending: false });
+      setTournaments(data ?? []);
+      setLoadingTournaments(false);
+    };
+    fetchTournaments();
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-surface-container-low border border-outline-variant rounded-xl w-full max-w-md p-6 shadow-2xl">
+        <div className="flex justify-between items-center mb-6">
+          <h2 style={{ fontFamily: 'Sora, sans-serif', fontSize: 24, fontWeight: 600, color: '#e1e2eb' }}>
+            Join Tournament
+          </h2>
+          <button onClick={onClose} className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg transition-colors">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {loadingTournaments ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin"
+                style={{ borderColor: '#fe6b00', borderTopColor: 'transparent' }} />
+            </div>
+          ) : tournaments.length === 0 ? (
+            <div className="text-center py-8">
+              <span className="material-symbols-outlined text-4xl text-outline block mb-2">emoji_events</span>
+              <p className="text-on-surface-variant font-body-md text-sm">No tournaments available yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {tournaments.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setSelectedId(t.id)}
+                  className="w-full text-left rounded-xl p-4 border transition-all"
+                  style={{
+                    background: selectedId === t.id ? 'rgba(254,107,0,0.1)' : '#1d2026',
+                    borderColor: selectedId === t.id ? '#fe6b00' : '#43474f',
+                  }}
+                >
+                  <p className="font-bold text-on-surface" style={{ fontFamily: 'Sora, sans-serif', fontSize: 15 }}>
+                    {t.name}
+                  </p>
+                  <p className="text-on-surface-variant text-xs mt-1" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                    {t.start_date} → {t.end_date}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {error && <p className="text-sm" style={{ color: '#ffb4ab' }}>{error}</p>}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-3 rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-container-highest transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => selectedId && onJoinExisting(selectedId)}
+              disabled={isLoading || !selectedId}
+              className="flex-1 px-4 py-3 rounded-lg font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              style={{ background: '#a5c8ff', color: '#00315f', fontFamily: 'Sora, sans-serif' }}
+            >
+              {isLoading ? (
+                <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+                  style={{ borderColor: '#00315f', borderTopColor: 'transparent' }} />
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-base">emoji_events</span>
+                  Join
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 // --- Add Player Modal ---
 function AddPlayerModal({
   isOpen,
@@ -558,13 +669,17 @@ function Toast({ message, onDismiss }: { message: string; onDismiss: () => void 
 const TeamEditInterface: React.FC = () => {
   const router = useRouter();
   const params = useParams();
-  const teamId = params?.id as string;
+  const teamId = params?.id as string;//the team id will be the team name slug, we will fetch the team by name and get the id from there
+  const slug = params?.slug as string;
 
+  const [showTournamentModal, setShowTournamentModal] = useState(false);
+  const [teamDBID, setTeamDBID] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [team, setTeam] = useState<Team | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCoach, setIsCoach] = useState(false);
+  const [coaches, setCoaches] = useState<{ id: string; user_id: string; roster_id: string }[]>([]);
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -578,7 +693,6 @@ const TeamEditInterface: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  // --- Fetch team + roster ---
   const fetchData = async () => {
     const supabase = createClient();
     setIsLoading(true);
@@ -588,31 +702,44 @@ const TeamEditInterface: React.FC = () => {
       if (authError || !authUser) { router.push('/auth/login'); return; }
       setUser(authUser);
 
-      // Check coach role
-      const { data: membership } = await supabase
-        .from('team_memberships')
-        .select('role')
-        .eq('user_id', authUser.id)
-        .eq('team_id', teamId)
-        .eq('status', 'active')
+      // 1. Resolve slug → team first
+      const nameFromSlug = (slug as string).replace(/-/g, ' ');
+      const { data: teamData, error: teamError } = await supabase
+        .from('teams')
+        .select('id, name, join_code, logo_url')
+        .ilike('name', nameFromSlug)
         .single();
 
+      if (teamError || !teamData) {
+        console.error('Team not found:', teamError);
+        router.push('/protected');
+        return; // Stop execution
+      }
+      setTeam(teamData);
+      setTeamDBID(teamData.id);
+
+      // 2. Now use teamData.id directly — don't rely on teamDbId state yet
+      const { data: membership, error: membershipError } = await supabase
+        .from('team_memberships')
+        .select('role, status')
+        .eq('user_id', authUser.id)
+        .eq('team_id', teamData.id)  // ← teamData.id not teamDbId
+        .eq('status', 'active')
+        .single();
+      console.log('Membership status:', membership?.status);
+      console.log('membership:', membership, membershipError);
+      
       if (!membership || membership.role !== 'coach') {
         router.push('/protected');
         return;
       }
       setIsCoach(true);
 
-      // Fetch team info
-      const { data: teamData, error: teamError } = await supabase
-        .from('teams')
-        .select('id, name, join_code, logo_url')
-        .eq('id', teamId)
-        .single();
-      if (teamError) throw teamError;
-      setTeam(teamData);
 
-      // Fetch roster — get all players for this team across all tournaments
+      //fetch coaches, to display up top
+
+
+      // 3. Fetch roster using teamData.id
       const { data: rosterData, error: rosterError } = await supabase
         .from('tournament_rosters')
         .select(`
@@ -620,36 +747,129 @@ const TeamEditInterface: React.FC = () => {
           jersey_number,
           claim_status,
           user_id,
-          players (
+          player_id,
+          players:player_id(
             id,
             name,
             position
           )
         `)
-        .eq('team_id', teamId)
-        .order('jersey_number', { ascending: true });
+        .eq('team_id', teamData.id)  // ← teamData.id not teamDbId
+        .order('jersey_number', { ascending: true, nullsFirst: false });
 
       if (rosterError) throw rosterError;
 
-      const mapped: Player[] = (rosterData ?? []).map((row: any) => ({
-        id: row.players.id,
-        name: row.players.name,
-        position: row.players.position,
-        jersey_number: row.jersey_number,
-        claim_status: row.claim_status,
+
+      const coachRows = (rosterData ?? []).filter((row: any) => row.player_id === null);
+      const unclaimedRows = (rosterData ?? []).filter((row: any) => row.player_id !== null && row.user_id === null);
+      const claimedRows = (rosterData ?? []).filter((row: any) => row.player_id !== null && row.user_id !== null);
+      
+      
+
+      const mappedCoaches = coachRows.map((row: any) => ({
+        id: row.id,
         user_id: row.user_id,
         roster_id: row.id,
+        claim_status: row.claim_status,
       }));
+      setCoaches(mappedCoaches);
 
-      setPlayers(mapped);
+      const mappedUnclaimedPlayers: Player[] = unclaimedRows.map((row: any) => {
+        // Access the players data through the relation
+        const playerData = row.players;
+        return {
+          id: playerData?.id,
+          name: playerData?.name ?? 'Unknown Player',
+          position: playerData?.position ?? null,
+          jersey_number: row.jersey_number,
+          claim_status: row.claim_status,
+          user_id: null,
+          roster_id: row.id,
+        };
+      });
+
+
+      const mappedClaimedPlayers: Player[] = claimedRows.map((row: any) => {
+        const playerData = row.players;
+        return {
+          id: playerData?.id,
+          name: playerData?.name ?? 'Unknown Player',
+          position: playerData?.position ?? null,
+          jersey_number: row.jersey_number,
+          claim_status: row.claim_status,
+          user_id: row.user_id,
+          roster_id: row.id,
+        };
+      });
+
+
+
+      const allPlayers = [...mappedClaimedPlayers, ...mappedUnclaimedPlayers];
+      setPlayers(allPlayers); // empty array is fine — the UI handles it
+
+
+
+      console.log('Coaches:', mappedCoaches.length);
+      console.log('Unclaimed players:', mappedUnclaimedPlayers.length);
+      console.log('Claimed players:', mappedClaimedPlayers.length);
     } catch (err) {
       console.error('Error loading team:', err);
     } finally {
-      setIsLoading(false);
+      setIsLoading(false); // ← this always runs, so loading won't hang
+    }
+};
+
+  useEffect(() => { if (slug) fetchData(); }, [slug]);
+
+
+
+  const handleJoinExistingTournament = async (tournamentId: string) => {
+    setActionLoading(true);
+    setActionError(null);
+    const supabase = createClient();
+
+    try {
+      // add the coach as the connection point for the team within tournament_rosters
+      const {error: coacherror} = await supabase
+        .from('tournament_rosters')
+        .insert({
+          tournament_id: tournamentId,
+          team_id: teamDBID,
+          player_id: null, // no player record for coach, just a placeholder entry to link team to tournament
+          jersey_number: null,
+          claim_status: 'claimed',
+          user_id: user!.id,
+        });
+      if (coacherror) throw coacherror;
+
+
+      const existingPlayers = players.map((p) => ({
+        tournament_id: tournamentId,
+        team_id: teamDBID,
+        player_id: p.id,
+        jersey_number: p.jersey_number,
+        claim_status: p.claim_status,
+        user_id: p.user_id,
+      }));
+
+      if (existingPlayers.length > 0) {
+        const { error } = await supabase
+          .from('tournament_rosters')
+          .upsert(existingPlayers, { onConflict: 'tournament_id,team_id,player_id' });
+        if (error) throw error;
+      }
+
+      setShowTournamentModal(false);
+      setToast('Joined tournament');
+    } catch (err) {
+      console.error('Join existing tournament error:', err);
+      setActionError(err instanceof Error ? err.message : 'Failed to join tournament');
+    } finally {
+      setActionLoading(false);
     }
   };
 
-  useEffect(() => { if (teamId) fetchData(); }, [teamId]);
+
 
   // --- Add player ---
   const handleAddPlayer = async (name: string, jerseyNumber: number | null, position: string | null) => {
@@ -672,7 +892,7 @@ const TeamEditInterface: React.FC = () => {
       const { data: tournaments } = await supabase
         .from('tournament_rosters')
         .select('tournament_id')
-        .eq('team_id', teamId)
+        .eq('team_id', teamDBID)
         .limit(1);
 
       const tournamentId = tournaments?.[0]?.tournament_id;
@@ -682,7 +902,7 @@ const TeamEditInterface: React.FC = () => {
         .from('tournament_rosters')
         .insert({
           tournament_id: tournamentId,
-          team_id: teamId,
+          team_id: teamDBID,
           player_id: player.id,
           jersey_number: jerseyNumber,
           claim_status: 'unclaimed',
@@ -875,7 +1095,16 @@ const TeamEditInterface: React.FC = () => {
               </p>
             </div>
           </div>
-
+            <button
+              onClick={() => { setActionError(null); setShowTournamentModal(true); }}
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition-colors font-label-bold"
+              style={{ borderColor: '#43474f', color: '#a5c8ff', fontFamily: 'JetBrains Mono, monospace' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#a5c8ff'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#43474f'; }}
+            >
+              <span className="material-symbols-outlined text-sm">emoji_events</span>
+              Tournament
+            </button>
           <div className="flex items-center gap-2">
             <button
               onClick={handleCopyCode}
@@ -968,7 +1197,13 @@ const TeamEditInterface: React.FC = () => {
         </button>
       </footer>
 
-      {/* Modals */}
+      <JoinTournamentModal
+        isOpen={showTournamentModal}
+        onClose={() => { setShowTournamentModal(false); setActionError(null); }}
+        onJoinExisting={handleJoinExistingTournament}
+        isLoading={actionLoading}
+        error={actionError}
+      />
       <AddPlayerModal
         isOpen={showAddModal}
         onClose={() => { setShowAddModal(false); setActionError(null); }}

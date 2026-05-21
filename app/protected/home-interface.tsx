@@ -105,7 +105,14 @@ export function HomeInterface({
 
     try {
       const supabase = createClient();
+    const { data: existing, error: checkError } = await supabase
+      .from("teams")
+      .select("id")
+      .ilike("name", newTeamName.trim())
+      .maybeSingle();
 
+    if (checkError) throw checkError;
+    if (existing) throw new Error("A team with this name already exists");
       // 1. Insert the new team
       const { data: team, error: teamError } = await supabase
         .from("teams")
@@ -151,8 +158,12 @@ export function HomeInterface({
 };
 
 
-  const navigateToTeam = (teamId: string) => {
-    router.push(`protected/teams/${teamId}`);
+  const navigateToTeam = (teamName: string) => {
+    const slug = teamName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "");
+    router.push(`/protected/teams/${slug}`);
   };
 
   const handleSignOut = async () => {
@@ -350,7 +361,7 @@ export function HomeInterface({
               {teams.map((team) => (
                 <div
                   key={team.id}
-                  onClick={() => navigateToTeam(team.id)}
+                  onClick={() => navigateToTeam(team.name)}
                   className="bg-[#1a1e26] border border-gray-800 rounded-xl p-6 cursor-pointer hover:border-cyan-500/50 hover:shadow-lg transition-all group"
                 >
                   <div className="flex items-start justify-between mb-4">
