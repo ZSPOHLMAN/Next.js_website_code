@@ -268,7 +268,7 @@ export function HomeInterface({
             </span>
           </div>
           <button
-            onClick={() => router.push("/notifications")}
+            onClick={() => router.push("/protected/notifications")}
             className="material-symbols-outlined text-gray-400 hover:text-cyan-500 transition-colors"
           >
             notifications
